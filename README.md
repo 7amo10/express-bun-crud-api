@@ -115,6 +115,8 @@ Interactive API documentation generated using OpenAPI 3.0 specification is serve
 
 You can test all CRUD operations directly in your browser using the "Try it out" feature.
 
+![Swagger UI Documentation](./assets/SwaggerUI.png)
+
 ---
 
 ## [5] The Mortality Experiment
