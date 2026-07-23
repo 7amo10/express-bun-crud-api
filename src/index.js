@@ -5,9 +5,17 @@ const PORT = process.env.PORT || 3020;
 
 app.use(express.json());
 
-// Stage 0: Hello Server
+// Stage 1: Root and Health Endpoints
 app.get('/', (req, res) => {
-  res.status(200).send('Hello, world! Welcome to the Task API.');
+  res.status(200).json({
+    name: 'Task API',
+    version: '1.0',
+    endpoints: ['/tasks']
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
 });
 
 if (process.env.NODE_ENV !== 'test') {
