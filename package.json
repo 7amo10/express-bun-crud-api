@@ -1,0 +1,25 @@
+{
+  "name": "w2-crud-api",
+  "version": "1.0.0",
+  "description": "Simple and robust CRUD API managing a To-Do list using Express and Bun",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/index.js",
+    "dev": "bun --watch src/index.js",
+    "test": "bun test.js"
+  },
+  "keywords": [
+    "express",
+    "bun",
+    "crud",
+    "api",
+    "swagger"
+  ],
+  "author": "FlyRank Intern",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1",
+    "swagger-ui-express": "^5.0.1"
+  }
+}
