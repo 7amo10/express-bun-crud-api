@@ -77,7 +77,7 @@ app.get('/tasks/:id', (req, res) => {
   res.status(200).json(formatTask(row));
 });
 
-// Stage 3: Create Endpoint with Validation
+// Stage 2: Create Endpoint with Database Insert
 app.post('/tasks', (req, res) => {
   const { title } = req.body || {};
 
@@ -85,13 +85,16 @@ app.post('/tasks', (req, res) => {
     return res.status(400).json({ error: 'Title is required and must be a non-empty string' });
   }
 
+  const cleanTitle = title.trim();
+  const insertStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
+  const info = insertStmt.run(cleanTitle, 0);
+
   const newTask = {
-    id: nextId++,
-    title: title.trim(),
+    id: Number(info.lastInsertRowid),
+    title: cleanTitle,
     done: false
   };
 
-  tasks.push(newTask);
   res.status(201).json(newTask);
 });
 
