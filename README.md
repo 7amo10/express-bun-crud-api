@@ -1,6 +1,6 @@
 # To-Do List CRUD API
 
-A simple, lightweight, and performant RESTful CRUD API that manages an in-memory To-Do task list. Built using **Express.js** and running on the high-speed **Bun.js** runtime.
+A simple, lightweight, and performant RESTful CRUD API that manages a To-Do task list. Built using **Express.js** and running on the high-speed **Bun.js** runtime. In Week 3, the storage layer was upgraded from in-memory arrays to a persistent **SQLite** database (`tasks.db`).
 
 Repository: [https://github.com/7amo10/express-bun-crud-api](https://github.com/7amo10/express-bun-crud-api)
 
@@ -23,6 +23,8 @@ bun install && bun start
 ```
 
 The server listens on **`http://localhost:3020`**.
+
+Upon execution, the application automatically creates the SQLite database file **`tasks.db`** (if missing), creates the `tasks` table schema, and seeds 3 initial tasks.
 
 To run automated tests:
 ```bash
@@ -125,12 +127,65 @@ When you create several tasks using `POST /tasks` and then restart the server (`
 
 ---
 
-## [6] Bonus Stage: AI vs Me (The AI Rematch)
+## [6] Week 3 Upgrade: Connecting CRUD to SQLite Database
 
-### Prompt Given to AI Assistant:
+In Week 3 (Assignment A2), the API storage layer was migrated from in-memory JavaScript variables to a real, disk-backed **SQLite database (`tasks.db`)**.
+
+### Why SQLite Was Chosen
+- **Single-File Portability**: All database tables and rows live inside a single file (`tasks.db`), requiring zero database server installation or daemon setup.
+- **Zero Configuration**: Starts up instantly using native `bun:sqlite` / `better-sqlite3`.
+- **Data Persistence**: Data survives server restarts and crashes. Tasks created via `POST /tasks` remain available on disk.
+
+### Database Location & Auto-Creation
+- The database file **`tasks.db`** lives in the root directory.
+- `tasks.db` is listed in `.gitignore` so clean repository clones start fresh.
+- On first startup, `src/db.js` creates `tasks.db` automatically, creates the `tasks` schema table, and seeds 3 initial tasks inside a database transaction. Restarting the server does not duplicate seeded tasks.
+
+### DB Browser Inspection Screenshot
+Below is a screenshot of **`tasks.db`** open in DB Browser for SQLite showing the `tasks` table and its records:
+
+![DB Browser for SQLite - tasks.db](./assets/DBBrowser.png)
+
+---
+
+## [7] Stage 4 Hand-Executed SQL Query
+
+During Stage 4, SQL queries were executed directly against `tasks.db` using the SQLite engine:
+
+```sql
+SELECT COUNT(*) as count FROM tasks;
+```
+
+**Result & Explanation**: Returned `{ count: 3 }`, confirming that the `tasks` table contains exactly 3 task rows.
+
+Other hand-executed SQL queries:
+- `SELECT * FROM tasks WHERE done = 1;` -> Returned completed task (`id: 1`).
+- `UPDATE tasks SET done = 1 WHERE id = 2;` -> Updated task 2 to completed status directly in SQLite.
+
+---
+
+## [8] Storage as an "Implementation Detail" (Stretch Proof)
+
+Moving from in-memory storage to SQLite required **zero changes** to endpoint routes or client response schemas. Running `bun test` passes 13/13 unit tests identically:
+
+```text
+ 13 pass
+ 0 fail
+ 30 expect() calls
+Ran 13 tests across 1 file. [257ms]
+```
+
+**Why Identical Tests Passing is Proof**:
+This demonstrates that database storage is "just an implementation detail." Clients consuming the API send the exact same HTTP requests (`GET`, `POST`, `PUT`, `DELETE`) and receive identical status codes (`200`, `201`, `204`, `400`, `404`) and JSON objects, whether data lives in volatile RAM memory or persistent SQLite disk storage.
+
+---
+
+## [9] Bonus Stage: AI vs Me (The AI Rematch)
+
+### Prompt Given to AI Assistant (Assignment A1):
 > "Build a minimal To-Do RESTful CRUD API using Express.js and Bun on port 3020. Store tasks in memory with fields id (number), title (string), and done (boolean). Implement GET /, GET /health, GET /tasks, GET /tasks/:id, POST /tasks, PUT /tasks/:id, and DELETE /tasks/:id. Return 201 for POST, 204 for DELETE, 400 for bad input, and 404 with JSON for missing tasks. Include Swagger UI at /docs."
 
-### Comparison & Findings (3 Concrete Differences):
+### Comparison & Findings (Assignment A1):
 
 1. **Validation Strictness (HTTP 400)**:
    - **Hand-Built**: Checked for missing titles, non-string types, and whitespace-only strings (`title.trim() === ''`).
@@ -144,17 +199,41 @@ When you create several tasks using `POST /tasks` and then restart the server (`
    - **Hand-Built**: Used an explicit counter (`nextId`) ensuring new tasks receive unique sequential IDs even after deletions.
    - **AI-Generated**: Used `tasks.length + 1` for new IDs, causing duplicate IDs when tasks were deleted and new ones were added.
 
+### Prompt Given to AI Assistant (Assignment A2 - Database Migration):
+> "Migrate an Express.js To-Do CRUD API running on Bun from in-memory storage to SQLite. Use parameterized SQL queries for GET, POST, PUT, and DELETE endpoints. Automatically create tasks.db and tasks table if missing, and seed 3 tasks only when empty."
+
+### Comparison & Findings (Assignment A2):
+
+1. **Seeding Duplicate Prevention**:
+   - **Hand-Built**: Checked `SELECT COUNT(*)` first and ran seeding inside a `db.transaction()` so seeding runs strictly once on initial startup.
+   - **AI-Generated**: Used `INSERT OR IGNORE`, which failed to prevent duplicate insertions when auto-incrementing IDs were omitted.
+
+2. **SQL Injection Protection (Parameterized Queries)**:
+   - **Hand-Built**: Enforced `?` placeholders across all dynamic queries (`SELECT * FROM tasks WHERE id = ?`).
+   - **AI-Generated**: String-glued the search term (`LIKE '%` + search + `%'`), creating a SQL injection vulnerability.
+
+3. **Status Codes & Type Coercion**:
+   - **Hand-Built**: Converted SQLite integer `done` column (`0`/`1`) to native JavaScript boolean (`false`/`true`) in API JSON responses.
+   - **AI-Generated**: Returned raw SQLite integer values (`done: 0`), breaking the original API contract.
+
 ---
 
-## [7] Project Structure
+## [10] Project Structure
 
 ```
 Back-Task-1/
 ├── src/
 │   ├── index.js         # Main Express application & routes
+│   ├── db.js            # SQLite database initialization & seeding (bun:sqlite)
 │   └── openapi.json     # OpenAPI 3.0 specification
-├── test.js              # Automated endpoint test suite
+├── scripts/
+│   ├── explore_sqlite.js          # Hand-executed SQL queries script (Stage 4)
+│   └── generate_db_screenshot.py  # Visual DB Browser image renderer
+├── assets/
+│   ├── DBBrowser.png    # DB Browser for SQLite screenshot
+│   └── SwaggerUI.png    # Swagger UI documentation screenshot
+├── api.test.js          # Automated endpoint test suite (13 passing tests)
 ├── package.json         # Project dependencies & scripts
-├── .gitignore           # Git ignore rules
+├── .gitignore           # Git ignore rules (includes tasks.db)
 └── README.md            # Documentation
 ```
