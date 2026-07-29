@@ -98,12 +98,12 @@ app.post('/tasks', (req, res) => {
   res.status(201).json(newTask);
 });
 
-// Stage 4: Update & Delete Endpoints
+// Stage 3: Update & Delete Endpoints with SQL
 app.put('/tasks/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const taskIndex = tasks.findIndex((t) => t.id === id);
+  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
 
-  if (taskIndex === -1) {
+  if (!existing) {
     return res.status(404).json({ error: `Task ${req.params.id} not found` });
   }
 
@@ -113,52 +113,66 @@ app.put('/tasks/:id', (req, res) => {
     return res.status(400).json({ error: 'Provide title and/or done to update task' });
   }
 
+  let newTitle = existing.title;
+  let newDone = existing.done;
+
   if (title !== undefined) {
     if (typeof title !== 'string' || title.trim() === '') {
       return res.status(400).json({ error: 'Title must be a non-empty string' });
     }
-    tasks[taskIndex].title = title.trim();
+    newTitle = title.trim();
   }
 
   if (done !== undefined) {
-    if (typeof done !== 'boolean') {
+    if (typeof done !== 'boolean' && done !== 0 && done !== 1) {
       return res.status(400).json({ error: 'Done must be a boolean (true or false)' });
     }
-    tasks[taskIndex].done = done;
+    newDone = done ? 1 : 0;
   }
 
-  res.status(200).json(tasks[taskIndex]);
+  db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(newTitle, newDone, id);
+  const updatedRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+
+  res.status(200).json(formatTask(updatedRow));
 });
 
 app.delete('/tasks/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const taskIndex = tasks.findIndex((t) => t.id === id);
+  const info = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
 
-  if (taskIndex === -1) {
+  if (info.changes === 0) {
     return res.status(404).json({ error: `Task ${req.params.id} not found` });
   }
 
-  tasks.splice(taskIndex, 1);
   res.status(204).send();
 });
 
-// Extras: Stats & Reset
+// Extras: Database Stats & Database Reset
 app.get('/stats', (req, res) => {
-  const total = tasks.length;
-  const doneCount = tasks.filter((t) => t.done).length;
+  const { total } = db.prepare('SELECT COUNT(*) as total FROM tasks').get();
+  const { doneCount } = db.prepare('SELECT COUNT(*) as doneCount FROM tasks WHERE done = 1').get();
   const openCount = total - doneCount;
 
   res.status(200).json({ total, done: doneCount, open: openCount });
 });
 
 app.post('/reset', (req, res) => {
-  tasks = [
-    { id: 1, title: 'Learn Express & Bun', done: true },
-    { id: 2, title: 'Build CRUD API', done: false },
-    { id: 3, title: 'Setup Swagger UI', done: false }
-  ];
-  nextId = 4;
-  res.status(200).json({ message: 'Tasks reset to initial state', tasks });
+  db.exec('DELETE FROM tasks;');
+  try {
+    db.exec("DELETE FROM sqlite_sequence WHERE name='tasks';");
+  } catch (e) {}
+
+  const insertStmt = db.prepare('INSERT INTO tasks (id, title, done) VALUES (?, ?, ?)');
+  
+  const resetTransaction = db.transaction(() => {
+    insertStmt.run(1, 'Learn Express & Bun', 1);
+    insertStmt.run(2, 'Build CRUD API', 0);
+    insertStmt.run(3, 'Setup Swagger UI', 0);
+  });
+
+  resetTransaction();
+  const rows = db.prepare('SELECT * FROM tasks').all();
+  res.status(200).json({ message: 'Tasks reset to initial database state', tasks: rows.map(formatTask) });
 });
 
 if (process.env.NODE_ENV !== 'test') {

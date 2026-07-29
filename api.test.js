@@ -7,8 +7,9 @@ let server;
 const PORT = 3020;
 const BASE_URL = `http://localhost:${PORT}`;
 
-beforeAll(() => {
+beforeAll(async () => {
   server = app.listen(PORT);
+  await fetch(`${BASE_URL}/reset`, { method: 'POST' });
 });
 
 afterAll(() => {
