@@ -35,32 +35,46 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// Stage 2: Read Endpoints (with query parameters filtering & search)
+// Helper: Format database task row (convert done 1/0 to boolean)
+const formatTask = (row) => ({
+  id: row.id,
+  title: row.title,
+  done: Boolean(row.done)
+});
+
+// Stage 1: Database Read Endpoints
 app.get('/tasks', (req, res) => {
-  let result = [...tasks];
+  let query = 'SELECT * FROM tasks';
+  const params = [];
+  const conditions = [];
 
   if (req.query.done !== undefined) {
-    const isDone = req.query.done === 'true';
-    result = result.filter((t) => t.done === isDone);
+    conditions.push('done = ?');
+    params.push(req.query.done === 'true' ? 1 : 0);
   }
 
   if (req.query.search) {
-    const term = req.query.search.toLowerCase();
-    result = result.filter((t) => t.title.toLowerCase().includes(term));
+    conditions.push('title LIKE ?');
+    params.push(`%${req.query.search}%`);
   }
 
-  res.status(200).json(result);
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  const rows = db.prepare(query).all(...params);
+  res.status(200).json(rows.map(formatTask));
 });
 
 app.get('/tasks/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const task = tasks.find((t) => t.id === id);
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
 
-  if (!task) {
+  if (!row) {
     return res.status(404).json({ error: `Task ${req.params.id} not found` });
   }
 
-  res.status(200).json(task);
+  res.status(200).json(formatTask(row));
 });
 
 // Stage 3: Create Endpoint with Validation
