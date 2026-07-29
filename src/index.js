@@ -1,6 +1,7 @@
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { readFileSync } from 'fs';
+import db from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3020;
