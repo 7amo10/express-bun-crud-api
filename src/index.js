@@ -87,102 +87,120 @@ app.get('/tasks/:id', async (req, res) => {
   }
 });
 
-// Stage 2: Create Endpoint with Database Insert
-app.post('/tasks', (req, res) => {
-  const { title } = req.body || {};
-
-  if (!title || typeof title !== 'string' || title.trim() === '') {
-    return res.status(400).json({ error: 'Title is required and must be a non-empty string' });
-  }
-
-  const cleanTitle = title.trim();
-  const insertStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
-  const info = insertStmt.run(cleanTitle, 0);
-
-  const newTask = {
-    id: Number(info.lastInsertRowid),
-    title: cleanTitle,
-    done: false
-  };
-
-  res.status(201).json(newTask);
-});
-
-// Stage 3: Update & Delete Endpoints with SQL
-app.put('/tasks/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-
-  if (!existing) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
-  }
-
-  const { title, done } = req.body || {};
-
-  if (title === undefined && done === undefined) {
-    return res.status(400).json({ error: 'Provide title and/or done to update task' });
-  }
-
-  let newTitle = existing.title;
-  let newDone = existing.done;
-
-  if (title !== undefined) {
-    if (typeof title !== 'string' || title.trim() === '') {
-      return res.status(400).json({ error: 'Title must be a non-empty string' });
-    }
-    newTitle = title.trim();
-  }
-
-  if (done !== undefined) {
-    if (typeof done !== 'boolean' && done !== 0 && done !== 1) {
-      return res.status(400).json({ error: 'Done must be a boolean (true or false)' });
-    }
-    newDone = done ? 1 : 0;
-  }
-
-  db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(newTitle, newDone, id);
-  const updatedRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-
-  res.status(200).json(formatTask(updatedRow));
-});
-
-app.delete('/tasks/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const info = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-
-  if (info.changes === 0) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
-  }
-
-  res.status(204).send();
-});
-
-// Extras: Database Stats & Database Reset
-app.get('/stats', (req, res) => {
-  const { total } = db.prepare('SELECT COUNT(*) as total FROM tasks').get();
-  const { doneCount } = db.prepare('SELECT COUNT(*) as doneCount FROM tasks WHERE done = 1').get();
-  const openCount = total - doneCount;
-
-  res.status(200).json({ total, done: doneCount, open: openCount });
-});
-
-app.post('/reset', (req, res) => {
-  db.exec('DELETE FROM tasks;');
+// Stage 3: Create, Update, Delete Endpoints on Postgres
+app.post('/tasks', async (req, res) => {
   try {
-    db.exec("DELETE FROM sqlite_sequence WHERE name='tasks';");
-  } catch (e) {}
+    const { title } = req.body || {};
 
-  const insertStmt = db.prepare('INSERT INTO tasks (id, title, done) VALUES (?, ?, ?)');
-  
-  const resetTransaction = db.transaction(() => {
-    insertStmt.run(1, 'Learn Express & Bun', 1);
-    insertStmt.run(2, 'Build CRUD API', 0);
-    insertStmt.run(3, 'Setup Swagger UI', 0);
-  });
+    if (!title || typeof title !== 'string' || title.trim() === '') {
+      return res.status(400).json({ error: 'Title is required and must be a non-empty string' });
+    }
 
-  resetTransaction();
-  const rows = db.prepare('SELECT * FROM tasks').all();
-  res.status(200).json({ message: 'Tasks reset to initial database state', tasks: rows.map(formatTask) });
+    const cleanTitle = title.trim();
+    const { rows } = await query(
+      'INSERT INTO tasks (title, done) VALUES ($1, $2) RETURNING *',
+      [cleanTitle, false]
+    );
+
+    res.status(201).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/tasks/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
+
+    const existingRes = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+    if (existingRes.rows.length === 0) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
+
+    const existing = existingRes.rows[0];
+    const { title, done } = req.body || {};
+
+    if (title === undefined && done === undefined) {
+      return res.status(400).json({ error: 'Provide title and/or done to update task' });
+    }
+
+    let newTitle = existing.title;
+    let newDone = existing.done;
+
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.trim() === '') {
+        return res.status(400).json({ error: 'Title must be a non-empty string' });
+      }
+      newTitle = title.trim();
+    }
+
+    if (done !== undefined) {
+      if (typeof done !== 'boolean') {
+        return res.status(400).json({ error: 'Done must be a boolean (true or false)' });
+      }
+      newDone = done;
+    }
+
+    const { rows } = await query(
+      'UPDATE tasks SET title = $1, done = $2 WHERE id = $3 RETURNING *',
+      [newTitle, newDone, id]
+    );
+
+    res.status(200).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/tasks/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
+
+    const { rows } = await query('DELETE FROM tasks WHERE id = $1 RETURNING *', [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Extras: Stats & Reset on Postgres
+app.get('/stats', async (req, res) => {
+  try {
+    const totalRes = await query('SELECT COUNT(*)::int as total FROM tasks');
+    const doneRes = await query('SELECT COUNT(*)::int as done_count FROM tasks WHERE done = true');
+    const total = totalRes.rows[0].total;
+    const doneCount = doneRes.rows[0].done_count;
+    const openCount = total - doneCount;
+
+    res.status(200).json({ total, done: doneCount, open: openCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/reset', async (req, res) => {
+  try {
+    await query('TRUNCATE TABLE tasks RESTART IDENTITY');
+    await query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Learn Express & Bun', true]);
+    await query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Build CRUD API', false]);
+    await query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Setup Swagger UI', false]);
+
+    const { rows } = await query('SELECT * FROM tasks ORDER BY id ASC');
+    res.status(200).json({ message: 'Tasks reset to initial database state', tasks: rows.map(formatTask) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 if (process.env.NODE_ENV !== 'test') {
