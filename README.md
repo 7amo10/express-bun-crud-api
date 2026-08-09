@@ -1,6 +1,6 @@
 # To-Do List CRUD API
 
-A simple, lightweight, and performant RESTful CRUD API that manages a To-Do task list. Built using **Express.js** and running on the high-speed **Bun.js** runtime. In Week 3, the storage layer was upgraded from in-memory arrays to a persistent **SQLite** database (`tasks.db`).
+A simple, lightweight, and performant RESTful CRUD API that manages a To-Do task list. Built using **Express.js** and running on the high-speed **Bun.js** runtime. In Week 3, the storage layer was upgraded from in-memory arrays (A1) to **SQLite** (`tasks.db` in A2), and finally to a containerized **PostgreSQL** database engine (`postgres:16-alpine` in A3) managed via **Docker Compose**.
 
 Repository: [https://github.com/7amo10/express-bun-crud-api](https://github.com/7amo10/express-bun-crud-api)
 
@@ -10,21 +10,31 @@ Repository: [https://github.com/7amo10/express-bun-crud-api](https://github.com/
 
 ### Prerequisites
 - [Bun](https://bun.sh) (v1.0.0+) or [Node.js](https://nodejs.org) (v18+)
+- [Docker & Docker Compose](https://docs.docker.com/get-docker/)
 
 ### Installation & Execution
 
+#### Option A: One-Command Docker Compose (Recommended - Assignment A3)
 ```bash
 # Clone the repository
 git clone https://github.com/7amo10/express-bun-crud-api.git
 cd express-bun-crud-api
 
-# Install dependencies and start the server
+# Copy environment template
+cp .env.example .env
+
+# Launch entire stack (API + PostgreSQL container)
+docker compose up -d --build
+```
+
+#### Option B: Local Execution (Assignment A1 / A2)
+```bash
 bun install && bun start
 ```
 
 The server listens on **`http://localhost:3020`**.
 
-Upon execution, the application automatically creates the SQLite database file **`tasks.db`** (if missing), creates the `tasks` table schema, and seeds 3 initial tasks.
+Upon execution, the application automatically creates the database table schema (if missing) and seeds 3 initial tasks.
 
 To run automated tests:
 ```bash
@@ -38,7 +48,7 @@ bun test
 | Method | Endpoint | Description | Status Code |
 |---|---|---|---|
 | `GET` | `/` | API Root Metadata & Endpoints List | `200 OK` |
-| `GET` | `/health` | Server Health Status Check | `200 OK` |
+| `GET` | `/health` | Server Health Status Check | `200 OK` / `500 Internal Error` |
 | `GET` | `/tasks` | List all tasks (Supports `?done=true/false` & `?search=term`) | `200 OK` |
 | `GET` | `/tasks/:id` | Get details of a single task by ID | `200 OK` / `404 Not Found` |
 | `POST` | `/tasks` | Create a new task (`{"title": "..."}`) | `201 Created` / `400 Bad Request` |
@@ -218,22 +228,94 @@ This demonstrates that database storage is "just an implementation detail." Clie
 
 ---
 
-## [10] Project Structure
+## [10] Week 3 Upgrade: Containerize Your Stack (Assignment A3)
+
+In Week 3 (Assignment A3), the storage layer was upgraded to a containerized **PostgreSQL** database engine (`postgres:16-alpine`) running inside Docker and orchestrated with **Docker Compose**.
+
+### Why Containerized PostgreSQL Was Chosen
+- **Environment Parity**: Eliminates "works on my machine" issues by packaging both the Bun Express API and PostgreSQL database inside deterministic Linux containers.
+- **Production Standardization**: Uses the exact same PostgreSQL database server engine deployed in production at scale across FlyRank services.
+- **Single Command Orchestration**: Running `docker compose up` brings up both the `api` container and the `db` container connected via a private virtual container network.
+
+### Environment Secrets & `.env` Security Workflow
+- Database passwords and connection strings are zero-hardcoded in code.
+- `.env` is git-ignored (listed in `.gitignore`).
+- A sample `.env.example` file is committed to git:
+  ```env
+  DATABASE_URL=postgres://postgres:dev@localhost:5432/tasks
+  PORT=3020
+  ```
+
+### Postgres Database Terminal Screenshot
+Below is a visual inspection of PostgreSQL open inside the `taskdb` Docker container:
+
+![PostgreSQL psql Terminal](./assets/PostgresDB.png)
+
+---
+
+## [11] 3-Way Storage Swap Proof (Memory -> SQLite -> PostgreSQL)
+
+Across assignments A1, A2, and A3, the storage engine was swapped three times:
+1. **Assignment A1**: In-memory JavaScript arrays
+2. **Assignment A2**: Persistent SQLite disk file (`tasks.db`)
+3. **Assignment A3**: Containerized PostgreSQL server (`postgres:16-alpine`)
+
+Running `bun test` passes all 13 unit tests **100% unchanged** across all three storage layers:
+
+```text
+ 13 pass
+ 0 fail
+ 30 expect() calls
+Ran 13 tests across 1 file. [978.00ms]
+```
+
+**Why Identical Tests Passing is Proof**:
+This proves that database storage is "just an implementation detail." Clients consuming the API send the exact same HTTP requests (`GET`, `POST`, `PUT`, `DELETE`) and receive identical status codes (`200`, `201`, `204`, `400`, `404`) and JSON objects, whether data lives in volatile RAM, SQLite disk files, or PostgreSQL containers.
+
+---
+
+## [12] Assignment A3 AI Rematch (Containerization)
+
+### Prompt Given to AI Assistant (Assignment A3):
+> "Containerize an Express/Bun To-Do CRUD API connecting to PostgreSQL using pg driver. Write a Dockerfile for the app and a compose.yaml with api and db services using postgres:16-alpine. Use parameterized $1 queries, read secrets from .env, mount a named volume for data persistence, and auto-create the tasks table and seed 3 tasks strictly on first run."
+
+### Comparison & Findings (Assignment A3):
+
+1. **Service Inter-Container Networking**:
+   - **Hand-Built**: Configured `DATABASE_URL` in `compose.yaml` to point to service name `db` (`postgres://postgres:dev@db:5432/tasks`), allowing internal container DNS resolution.
+   - **AI-Generated**: Hardcoded `localhost:5432` inside `compose.yaml` environment variables, causing the `api` container to fail connecting to the `db` container.
+
+2. **Health Check & Startup Dependency**:
+   - **Hand-Built**: Added `healthcheck: test: ["CMD-SHELL", "pg_isready -U postgres -d tasks"]` on `db` and `depends_on: db: condition: service_healthy` on `api`, preventing crash loops.
+   - **AI-Generated**: Used standard `depends_on: [db]` without a health check, causing the app container to crash on startup before Postgres finished initializing sockets.
+
+3. **Data Persistence Across Restarts**:
+   - **Hand-Built**: Defined named volume `taskdata:/var/lib/postgresql/data` ensuring data survives container restarts and teardowns.
+   - **AI-Generated**: Omitted volume definitions, wiping database records every time `docker compose down` was executed.
+
+---
+
+## [13] Project Structure
 
 ```
 Back-Task-1/
 ├── src/
 │   ├── index.js         # Main Express application & routes
-│   ├── db.js            # SQLite database initialization & seeding (bun:sqlite)
+│   ├── db.js            # PostgreSQL connection pool & table initialization (pg)
 │   └── openapi.json     # OpenAPI 3.0 specification
 ├── scripts/
 │   ├── explore_sqlite.js          # Hand-executed SQL queries script (Stage 4)
-│   └── generate_db_screenshot.py  # Visual DB Browser image renderer
+│   ├── generate_db_screenshot.py  # Visual SQLite DB Browser image renderer
+│   └── generate_pg_screenshot.py  # Visual Postgres psql terminal renderer
 ├── assets/
+│   ├── PostgresDB.png   # PostgreSQL psql container screenshot
 │   ├── DBBrowser.png    # DB Browser for SQLite screenshot
 │   └── SwaggerUI.png    # Swagger UI documentation screenshot
 ├── api.test.js          # Automated endpoint test suite (13 passing tests)
+├── Dockerfile           # Bun API container build recipe
+├── compose.yaml         # Docker Compose stack specification (api + db)
+├── .env.example         # Environment variables template
 ├── package.json         # Project dependencies & scripts
-├── .gitignore           # Git ignore rules (includes tasks.db)
-└── README.md            # Documentation
+├── .gitignore           # Git ignore rules (includes .env, tasks.db)
+└── README.md            # Cumulative project documentation
 ```

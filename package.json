@@ -19,7 +19,6 @@
   "author": "FlyRank Intern",
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
     "express": "^5.2.1",
     "pg": "^8.23.0",
     "swagger-ui-express": "^5.0.1"
