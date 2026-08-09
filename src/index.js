@@ -1,7 +1,7 @@
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { readFileSync } from 'fs';
-import db from './db.js';
+import pool, { query, initDb } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3020;
@@ -13,14 +13,12 @@ const swaggerDocument = JSON.parse(
 app.use(express.json());
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-// In-memory data store
-let tasks = [
-  { id: 1, title: 'Learn Express & Bun', done: true },
-  { id: 2, title: 'Build CRUD API', done: false },
-  { id: 3, title: 'Setup Swagger UI', done: false }
-];
-
-let nextId = 4;
+// Helper: Format database task row (convert done to boolean)
+const formatTask = (row) => ({
+  id: row.id,
+  title: row.title,
+  done: Boolean(row.done)
+});
 
 // Stage 1: Root and Health Endpoints
 app.get('/', (req, res) => {
@@ -31,50 +29,62 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+app.get('/health', async (req, res) => {
+  try {
+    await query('SELECT 1');
+    res.status(200).json({ status: 'ok', db: 'ok' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', db: err.message });
+  }
 });
 
-// Helper: Format database task row (convert done 1/0 to boolean)
-const formatTask = (row) => ({
-  id: row.id,
-  title: row.title,
-  done: Boolean(row.done)
+// Stage 2: Read Endpoints from Postgres
+app.get('/tasks', async (req, res) => {
+  try {
+    let sql = 'SELECT * FROM tasks';
+    const params = [];
+    const conditions = [];
+
+    if (req.query.done !== undefined) {
+      params.push(req.query.done === 'true');
+      conditions.push(`done = $${params.length}`);
+    }
+
+    if (req.query.search) {
+      params.push(`%${req.query.search}%`);
+      conditions.push(`title ILIKE $${params.length}`);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY id ASC';
+
+    const { rows } = await query(sql, params);
+    res.status(200).json(rows.map(formatTask));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Stage 1: Database Read Endpoints
-app.get('/tasks', (req, res) => {
-  let query = 'SELECT * FROM tasks';
-  const params = [];
-  const conditions = [];
+app.get('/tasks/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
 
-  if (req.query.done !== undefined) {
-    conditions.push('done = ?');
-    params.push(req.query.done === 'true' ? 1 : 0);
+    const { rows } = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    }
+
+    res.status(200).json(formatTask(rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  if (req.query.search) {
-    conditions.push('title LIKE ?');
-    params.push(`%${req.query.search}%`);
-  }
-
-  if (conditions.length > 0) {
-    query += ' WHERE ' + conditions.join(' AND ');
-  }
-
-  const rows = db.prepare(query).all(...params);
-  res.status(200).json(rows.map(formatTask));
-});
-
-app.get('/tasks/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-
-  if (!row) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
-  }
-
-  res.status(200).json(formatTask(row));
 });
 
 // Stage 2: Create Endpoint with Database Insert
