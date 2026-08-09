@@ -1,38 +1,44 @@
-import { Database } from 'bun:sqlite';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import pg from 'pg';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = join(__dirname, '..', 'tasks.db');
+const { Pool } = pg;
+const connectionString = process.env.DATABASE_URL || 'postgres://postgres:dev@localhost:5432/tasks';
 
-const db = new Database(dbPath);
+const pool = new Pool({
+  connectionString
+});
 
-db.exec('PRAGMA journal_mode = WAL;');
+export const initDb = async () => {
+  const client = await pool.connect();
+  try {
+    // Stage 1: Create tasks table if missing
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        done BOOLEAN NOT NULL DEFAULT FALSE
+      );
+    `);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0
-  );
-`);
+    // Seed 3 example tasks ONLY if table is empty
+    const { rows } = await client.query('SELECT COUNT(*)::int as count FROM tasks;');
+    if (rows[0].count === 0) {
+      await client.query('BEGIN');
+      await client.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Learn Express & Bun', true]);
+      await client.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Build CRUD API', false]);
+      await client.query('INSERT INTO tasks (title, done) VALUES ($1, $2)', ['Setup Swagger UI', false]);
+      await client.query('COMMIT');
+      console.log('[Postgres] Table initialized & seeded with 3 example tasks.');
+    } else {
+      console.log(`[Postgres] Database connected. Found ${rows[0].count} task(s).`);
+    }
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[Postgres] Error initializing database:', err);
+    throw err;
+  } finally {
+    client.release();
+  }
+};
 
-const countStmt = db.prepare('SELECT COUNT(*) as count FROM tasks');
-const { count } = countStmt.get();
-
-if (count === 0) {
-  const insertStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
-  
-  const seedTransaction = db.transaction(() => {
-    insertStmt.run('Learn Express & Bun', 1);
-    insertStmt.run('Build CRUD API', 0);
-    insertStmt.run('Setup Swagger UI', 0);
-  });
-
-  seedTransaction();
-  console.log('[DB] Database initialized and seeded with 3 example tasks.');
-} else {
-  console.log(`[DB] Database connected. Found ${count} existing task(s).`);
-}
-
-export default db;
+export const query = (text, params) => pool.query(text, params);
+export default pool;
