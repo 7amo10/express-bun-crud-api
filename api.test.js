@@ -8,12 +8,17 @@ const PORT = 3020;
 const BASE_URL = `http://localhost:${PORT}`;
 
 beforeAll(async () => {
-  server = app.listen(PORT);
+  try {
+    server = app.listen(PORT);
+  } catch (e) {
+    // Port 3020 is already in use (e.g. running container/server), tests query running server directly
+  }
+  server?.on('error', () => {});
   await fetch(`${BASE_URL}/reset`, { method: 'POST' });
 });
 
 afterAll(() => {
-  if (server) server.close();
+  if (server && server.listening) server.close();
 });
 
 describe('To-Do List CRUD API Endpoint Tests', () => {
